@@ -1,114 +1,93 @@
+# Tax Automation Events
 
+A proof of concept that connects a Python automation app to a NestJS backend over Socket.IO. When a return is submitted, Nest sends the return payload to Python, Python automates each form and reports its status back, and Nest validates and logs every event.
 
-# Taxwise Automation: NestJS + Python (Socket.io)
-
-This project connects a **NestJS backend server** with a **Python client** using Socket.io.
-
-- **NestJS = backend server.** It holds the client's form data (JSON) and starts the automation.
-- **Python = client.** It connects to the NestJS server, receives the JSON, logs it, and runs the Taxwise automation.
-
-Before, the forms JSON was hardcoded inside the Python automation. Now the JSON comes from the backend, so the automation works with real data.
-
-## Flow
+## Structure
 
 ```
-AUTOMATE BUTTON
-      |
-      v
-Request data  (POST /individual-return/submit)
-      |
-      v
-NESTJS (backend server)
-      |
-      |  fetch client JSON
-      v
-PYTHON (client) receives JSON
-      |
-  +---+--------------+
-  |                  |
-  v                  v
-LOG JSON       TAXWISE AUTOMATION
+taxwise-integration/
+├── nest-backend/     NestJS backend (Socket.IO gateway + submit endpoint)
+└── python-app/       Python GUI client (customtkinter + python-socketio)
 ```
 
-### Step by step
+## How it works
 
-1. NestJS starts and runs the Socket.io server.
-2. Python starts (`app.py`) and connects to the NestJS server. The connection stays open and waits for work.
-3. The user presses the **Automate** button.
-4. The button sends a request to NestJS (`POST /individual-return/submit`).
-5. NestJS gets the client's JSON.
-6. NestJS sends the JSON to Python with the `return:submitted` event.
-7. Python receives the JSON, logs it, and starts the Taxwise automation.
-8. While running, Python reports progress back to NestJS.
-
-## The two responsibilities
-
-### 1. Connection
-Build and keep the Socket.io connection between the NestJS server and the Python client.
-
-- NestJS is the server (the gateway in `src/websockets/`).
-- Python is the client and connects to NestJS.
-- Only a client with the correct `WORKER_TOKEN` is accepted.
-- Python reconnects automatically if the server restarts.
-
-### 2. Event triggering
-When the Automate button is pressed, trigger the event that starts the form automation.
-
-- The controller (`submit.controller.ts`) receives the button request.
-- The gateway emits `return:submitted` to Python with the client JSON.
-- Python then runs the automation and sends status events back as each form starts and finishes.
+1. Start Nest, then run the Python app. Click **Connect** (the light turns green).
+2. Submit a return with a `POST` to Nest. `clientId` and `returnId` are read from the URL.
+3. Nest loads the return JSON (a dummy file for now), validates it with a DTO, and emits `return:submitted` to Python.
+4. Python receives the payload and runs each form row (MIS, W2, 1099C, and so on).
+5. For every row, Python emits status events back to Nest, which validates and logs them.
+6. When all rows are done, Python emits `automation:completed`.
 
 ## Events
 
-| Event | Direction | What it does |
-|---|---|---|
-| `return:submitted` | NestJS to Python | Sends the client JSON and starts the automation |
-| `automation:start` | Python to NestJS | Python started a run |
-| `form:status` | Python to NestJS | Progress of each form: started, in_progress, completed, failed |
-| `automation:end` | Python to NestJS | The run finished |
+| Event | Emitted by | Listened by | Purpose |
+|---|---|---|---|
+| `return:submitted` | Nest | Python | Carries the return payload |
+| `automation:started` | Python | Nest | Run begins |
+| `form:started` | Python | Nest | A form row begins (with `startedAt`) |
+| `form:in_progress` | Python | Nest | The form row is being automated |
+| `form:completed` | Python | Nest | Row finished (with `durationSec`) |
+| `form:failed` | Python | Nest | Row failed (with `error`) |
+| `automation:completed` | Python | Nest | All rows done (with `failed` count) |
 
-Every event Python sends has a unique `eventId`, so the same event is never processed twice.
-
-## Project structure
-
-```
-src/
-  dto/                    Validation for incoming data
-  dummy/                  Sample form JSON for testing
-  types/                  safe-handler wrapper
-  utils/                  validateDto helper
-  websockets/             Socket.io gateway (NestJS server side)
-  submit.controller.ts    Endpoint the Automate button calls
-  app.module.ts
-app.py                    Python client + Taxwise automation
-```
+Every Python event carries `clientId`, `returnId`, `userId`, `returnType` and `taxYear`. Form events also carry `form` and `ref` (a label such as the employer name plus `#1`).
 
 ## Setup
 
-### NestJS (backend server)
+### Nest backend
 
-```bash
+```
+cd nest-backend
 npm install
-cp .env.example .env      # set PORT and WORKER_TOKEN
 npm run start:dev
 ```
 
-### Python (client)
+Runs on port 3000.
 
-```bash
-pip install "python-socketio[client]"
+### Python app
+
+```
+cd python-app
+python -m venv venv
+venv\Scripts\activate
+pip install customtkinter "python-socketio[client]" websocket-client
 python app.py
 ```
 
-Start NestJS first, then Python.
+### Dummy data
 
+Create `nest-backend/src/dummy/job.json` with a return payload. This file contains sensitive data (SSNs, bank numbers), is listed in `.gitignore`, and must never be committed.
 
-Use the JSON in `src/dummy/` as the body to test with real-looking data.
+## Submitting a return (Postman)
 
-## Common problems
+```
+POST http://localhost:3000/individual-return-details?clientId=1697&returnId=1270&userId=613&returnType=individual&fromPortal=false
+```
 
-| Problem | Reason |
-|---|---|
-| Python cannot connect | Wrong `WORKER_TOKEN`, or NestJS is not running |
-| Button does nothing | Python client is not connected |
-| Python connects but does not run | Event name does not match `return:submitted` |
+- Python must be connected first, otherwise Nest replies `No Python client connected`.
+- The response is `{ "ok": true, ... }` when the return was sent to Python.
+
+## Validation and errors
+
+- Incoming payloads and events are validated with DTO classes (`class-validator`).
+- Handlers are wrapped in `safe()`, so a bad event returns `{ ok: false, error }` instead of crashing Nest.
+- In Python, a failed row emits `form:failed` and the run continues with the next row.
+
+## Current limitations
+
+- `return:submitted` is broadcast to every connected Python. This is fine with one client; production needs targeting by the owner of the return.
+- No authentication on the socket yet. Production should send the user's JWT on connect and have Nest verify it.
+- Statuses are only logged, not saved to a database.
+- Events are fire-and-forget (no acknowledgements).
+- `fill_form` is a dummy (`sleep`); the real bot is not connected yet.
+- Only the `individual` return type is implemented.
+
+## Next steps
+
+1. JWT on the socket connection, with returns sent only to the owner's socket.
+2. Persist runs and form statuses in a database.
+3. Acknowledgements and retries on events.
+4. Real form automation in place of the dummy.
+5. Business return forms.
+6. Tests (pytest for the JSON helpers, Vitest for the DTOs).
