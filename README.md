@@ -31,7 +31,6 @@ taxwise-integration/
 | `form:failed` | Python | Nest | Row failed (with `error`) |
 | `automation:completed` | Python | Nest | All rows done (with `failed` count) |
 
-Every Python event carries `clientId`, `returnId`, `userId`, `returnType` and `taxYear`. Form events also carry `form` and `ref` (a label such as the employer name plus `#1`).
 
 ## Setup
 
