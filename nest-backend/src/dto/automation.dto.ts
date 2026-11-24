@@ -1,45 +1,33 @@
-
-
-
 import {
-  IsIn, IsInt, IsISO8601, IsNotEmpty, IsNumber,
-  IsObject, IsOptional, IsString, IsUUID, ValidateIf,
+  IsArray, IsDefined, IsInt, IsISO8601, IsNotEmpty,
+  IsNumber, IsObject, IsOptional, IsString, IsIn, IsBoolean
 } from 'class-validator';
 
-export class AutomationStartDto {
-  @IsUUID() eventId: string;
+// Nest -> Python
+export class ReturnPayloadDto {
+  @IsInt() clientId: number;
   @IsInt() returnId: number;
-  @IsString() @IsNotEmpty() taxYear: string;
+  @IsInt() userId: number;
   @IsIn(['individual', 'business']) returnType: 'individual' | 'business';
+  @IsBoolean() fromPortal: boolean;
+  @IsOptional() @IsObject() mis?: Record<string, unknown>;
+  @IsOptional() @IsArray() w2?: Record<string, unknown>[];
+  @IsOptional() @IsArray() f1099c?: Record<string, unknown>[];
 }
 
-export class FormStatusDto {
-  @IsUUID() eventId: string;
-  @IsUUID() runId: string;
+// Python -> Nest
+export class RunEventDto {
+  @IsInt() clientId: number;
+  @IsInt() returnId: number;
+  @IsInt() userId: number;
+  @IsIn(['individual', 'business']) returnType: 'individual' | 'business';
+  @IsString() @IsNotEmpty() taxYear: string;
+}
+
+export class FormEventDto extends RunEventDto {
   @IsString() @IsNotEmpty() form: string;
-  @IsObject() ref: Record<string, string | number>;
-  @IsIn(['started', 'in_progress', 'completed', 'failed'])
-  status: 'started' | 'in_progress' | 'completed' | 'failed';
-  @IsISO8601() timestamp: string;
-
-  @ValidateIf((o) => o.status === 'started' || o.status === 'completed')
-  @IsISO8601() startedAt?: string;
-
-  @ValidateIf((o) => o.status === 'completed')
-  @IsISO8601() endedAt?: string;
-
-  @ValidateIf((o) => o.status === 'completed')
-  @IsNumber() durationSec?: number;
-
-  @IsOptional() @IsString() detail?: string | null;
-
-  @ValidateIf((o) => o.status === 'failed')
-  @IsString() error?: string;
-}
-
-export class AutomationEndDto {
-  @IsUUID() eventId: string;
-  @IsUUID() runId: string;
-  @IsIn(['completed', 'failed']) status: 'completed' | 'failed';
-  @IsISO8601() timestamp: string;
+  @IsDefined() ref: string | number;
+  @IsOptional() @IsISO8601() startedAt?: string;
+  @IsOptional() @IsNumber() durationSec?: number;
+  @IsOptional() @IsString() error?: string;
 }

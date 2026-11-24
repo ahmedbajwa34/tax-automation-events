@@ -1,101 +1,81 @@
 import {
   WebSocketGateway, OnGatewayConnection, OnGatewayDisconnect,
-  WebSocketServer, SubscribeMessage, MessageBody, ConnectedSocket,
+  WebSocketServer, SubscribeMessage, MessageBody,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { randomUUID } from 'crypto';
 import { safe } from '../types/safe-handler.js';
 import { validateDto } from '../utils/validate.js';
-import {
-  AutomationStartDto,
-  FormStatusDto,
-  AutomationEndDto,
-} from '../dto/automation.dto.js';
+import { FormEventDto, RunEventDto } from '../dto/automation.dto.js';
 
 @WebSocketGateway({ cors: true })
 export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer() server: Server;
 
-  private runs = new Map<string, string>();        
-  private processed = new Map<string, unknown>();  
 
-  private once<T>(eventId: string, fn: () => T): T {
-    if (this.processed.has(eventId)) {
-      return this.processed.get(eventId) as T;
-    }
-    const res = fn();
-    this.processed.set(eventId, res);
-    if (this.processed.size > 5000) {
-      const oldest = this.processed.keys().next().value;
-      if (oldest) this.processed.delete(oldest);
-    }
-    return res;
-  }
+handleConnection(client: Socket) {
+  console.log(`Python connected: ${client.id}`);
+}
 
-  handleConnection(client: Socket): void {
-    console.log(`Client connected: ${client.id}`);
-  }
+handleDisconnect(client: Socket) {
+  console.log(`Python disconnected: ${client.id}`);
+}
 
-  handleDisconnect(client: Socket): void {
-    const runId = this.runs.get(client.id);
-    if (runId) {
-      console.log(`[${runId}] interrupted (client disconnected)`);
-      this.runs.delete(client.id);
-    }
-    console.log(`Client disconnected: ${client.id}`);
-  }
+sendReturn(payload: object): number {
+  this.server.emit('return:submitted', payload);
+  return this.server.sockets.sockets.size;
+}
 
-  @SubscribeMessage('automation:start')
-  onStart(@ConnectedSocket() client: Socket, @MessageBody() body: unknown) {
-    return safe('automation:start', () => {
-      const b = validateDto(AutomationStartDto, body);
-      return this.once(b.eventId, () => {
-        const runId = randomUUID();
-        this.runs.set(client.id, runId);
-        console.log(`[${runId}] started: return=${b.returnId} year=${b.taxYear} type=${b.returnType}`);
-        return { ok: true, runId };
-      });
+  @SubscribeMessage('automation:started')
+  onRunStart(@MessageBody() body: unknown) {
+    return safe('automation:started', () => {
+      const b = validateDto(RunEventDto, body);
+      console.log(`[client ${b.clientId} | return ${b.returnId}] automation STARTED`);
+      return { ok: true };
     });
   }
 
-  @SubscribeMessage('form:status')
-  onFormStatus(@MessageBody() body: unknown) {
-    return safe('form:status', () => {
-      const b = validateDto(FormStatusDto, body);
-      return this.once(b.eventId, () => {
-        const time = new Date(b.timestamp).toLocaleTimeString();
-        const label = Object.entries(b.ref).map(([k, v]) => `${k}=${v}`).join(', ');
-        const prefix = `[${b.runId}] ${time} - Form ${b.form} (${label})`;
-
-        switch (b.status) {
-          case 'started':
-            console.log(`${prefix} started`);
-            break;
-          case 'in_progress':
-            console.log(`${prefix} in progress${b.detail ? `: ${b.detail}` : ''}`);
-            break;
-          case 'completed':
-            console.log(`${prefix} completed (took ${b.durationSec}s)`);
-            break;
-          case 'failed':
-            console.log(`${prefix} failed: ${b.error}`);
-            break;
-        }
-        return { ok: true };
-      });
+  @SubscribeMessage('form:started')
+  onFormStart(@MessageBody() body: unknown) {
+    return safe('form:started', () => {
+      const b = validateDto(FormEventDto, body);
+      console.log(`[return ${b.returnId}] ${b.form} (${b.ref}) STARTED at ${b.startedAt}`);
+      return { ok: true };
     });
   }
 
-  @SubscribeMessage('automation:end')
-  onEnd(@ConnectedSocket() client: Socket, @MessageBody() body: unknown) {
-    return safe('automation:end', () => {
-      const b = validateDto(AutomationEndDto, body);
-      return this.once(b.eventId, () => {
-        const time = new Date(b.timestamp).toLocaleTimeString();
-        console.log(`[${b.runId}] ${time} - Automation finished: ${b.status}`);
-        this.runs.delete(client.id);
-        return { ok: true };
-      });
+  @SubscribeMessage('form:in_progress')
+  onFormProgress(@MessageBody() body: unknown) {
+    return safe('form:in_progress', () => {
+      const b = validateDto(FormEventDto, body);
+      console.log(`[return ${b.returnId}] ${b.form} (${b.ref}) IN PROGRESS`);
+      return { ok: true };
+    });
+  }
+
+  @SubscribeMessage('form:completed')
+  onFormDone(@MessageBody() body: unknown) {
+    return safe('form:completed', () => {
+      const b = validateDto(FormEventDto, body);
+      console.log(`[return ${b.returnId}] ${b.form} (${b.ref}) COMPLETED in ${b.durationSec}s`);
+      return { ok: true };
+    });
+  }
+
+  @SubscribeMessage('form:failed')
+  onFormFail(@MessageBody() body: unknown) {
+    return safe('form:failed', () => {
+      const b = validateDto(FormEventDto, body);
+      console.log(`[return ${b.returnId}] ${b.form} (${b.ref}) FAILED: ${b.error}`);
+      return { ok: true };
+    });
+  }
+
+  @SubscribeMessage('automation:completed')
+  onRunEnd(@MessageBody() body: unknown) {
+    return safe('automation:completed', () => {
+      const b = validateDto(RunEventDto, body);
+      console.log(`[client ${b.clientId} | return ${b.returnId}] automation COMPLETED`);
+      return { ok: true };
     });
   }
 }

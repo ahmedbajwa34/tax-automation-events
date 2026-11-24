@@ -1,13 +1,16 @@
-
-
-
-
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
 
-export function validateDto<T extends object>(cls: new () => T, data: unknown): T {
+export function validateDto<T extends object>(
+  cls: new () => T,
+  data: unknown,
+  strict = true,
+): T {
   const obj = plainToInstance(cls, data);
-  const errors = validateSync(obj, { whitelist: true, forbidNonWhitelisted: true });
+  const errors = validateSync(
+    obj,
+    strict ? { whitelist: true, forbidNonWhitelisted: true } : {},
+  );
   if (errors.length) {
     const msg = errors
       .map((e) => Object.values(e.constraints ?? {}).join(', '))

@@ -3,6 +3,9 @@ import { createObserveModule } from '@nestjs/observe';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
 import { WebsocketGateway } from './websocket/websocket.gateway.js';
+import { SubmitController } from './submit.controller.js';
+
+
 
 export const { ObserveModule, ObserveInstrument } = createObserveModule();
 
@@ -17,7 +20,7 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule();
       serviceId: 'nest-backend',
     }),
   ],
-  controllers: [AppController],
+  controllers: [AppController, SubmitController],
   providers: [AppService, WebsocketGateway],
 })
 export class AppModule {}

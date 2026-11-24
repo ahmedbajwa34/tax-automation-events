@@ -12,3 +12,5 @@ venv/
 # node
 node_modules/
 dist/
+
+nest-backend/src/dummy/job.json
